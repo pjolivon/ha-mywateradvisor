@@ -44,7 +44,7 @@ class MyWaterAdvisorBillingCycleLimitNumber(_MyWaterAdvisorEntity, NumberEntity)
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
     _attr_icon = "mdi:tune"
-    _attr_translation_key = "billing_cycle_limit"
+    _attr_name = "Billing Cycle Limit"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -78,7 +78,7 @@ class MyWaterAdvisorWaterPriceNumber(_MyWaterAdvisorEntity, NumberEntity):
     _attr_mode = NumberMode.BOX
     _attr_icon = "mdi:cash"
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_translation_key = "price_per_gallon"
+    _attr_name = "Price Per Gallon"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)

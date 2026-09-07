@@ -22,7 +22,7 @@ class MyWaterAdvisorLeakAlertSensor(_MyWaterAdvisorEntity, BinarySensorEntity):
     """On when the portal has an active 'Suspected Leak' style alert."""
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_translation_key = "leak_alert"
+    _attr_name = "Leak Alert"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)

@@ -25,29 +25,5 @@
       "already_configured": "This account is already configured.",
       "reauth_successful": "Re-authentication was successful."
     }
-  },
-  "entity": {
-    "sensor": {
-      "total_usage": { "name": "Total Usage" },
-      "daily_usage": { "name": "Daily Usage" },
-      "last_reading_time": { "name": "Last Reading Time" },
-      "serial_number": { "name": "Serial Number" },
-      "service_address": { "name": "Service Address" },
-      "debug": { "name": "Debug" },
-      "billing_cycle_forecast": { "name": "Billing Cycle Forecast" },
-      "active_alerts": { "name": "Active Alerts" },
-      "billing_cycle_usage": { "name": "Billing Cycle Usage" },
-      "neighborhood_average_usage": { "name": "Neighborhood Average Usage" }
-    },
-    "binary_sensor": {
-      "leak_alert": { "name": "Leak Alert" }
-    },
-    "number": {
-      "billing_cycle_limit": { "name": "Billing Cycle Limit" },
-      "price_per_gallon": { "name": "Price Per Gallon" }
-    },
-    "switch": {
-      "vacation_mode": { "name": "Vacation Mode" }
-    }
   }
 }

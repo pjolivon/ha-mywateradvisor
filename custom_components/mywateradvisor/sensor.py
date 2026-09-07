@@ -84,7 +84,7 @@ class MyWaterAdvisorTotalSensor(_MyWaterAdvisorEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
     _attr_icon = "mdi:water"
-    _attr_translation_key = "total_usage"
+    _attr_name = "Total Usage"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -112,7 +112,7 @@ class MyWaterAdvisorDailySensor(_MyWaterAdvisorEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
     _attr_icon = "mdi:water-outline"
-    _attr_translation_key = "daily_usage"
+    _attr_name = "Daily Usage"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -137,7 +137,7 @@ class MyWaterAdvisorLastReadingSensor(_MyWaterAdvisorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:clock-outline"
-    _attr_translation_key = "last_reading_time"
+    _attr_name = "Last Reading Time"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -155,7 +155,7 @@ class MyWaterAdvisorMeterSerialSensor(_MyWaterAdvisorEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:identifier"
-    _attr_translation_key = "serial_number"
+    _attr_name = "Serial Number"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -173,7 +173,7 @@ class MyWaterAdvisorServiceAddressSensor(_MyWaterAdvisorEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:map-marker"
-    _attr_translation_key = "service_address"
+    _attr_name = "Service Address"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -191,7 +191,7 @@ class MyWaterAdvisorDebugSensor(_MyWaterAdvisorEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:bug-outline"
-    _attr_translation_key = "debug"
+    _attr_name = "Debug"
     _attr_entity_registry_enabled_default = False
     # The raw payload can approach HA's per-attribute recorder size limit and
     # would otherwise be written to the database every poll for no benefit.
@@ -221,7 +221,7 @@ class MyWaterAdvisorForecastSensor(_MyWaterAdvisorEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
     _attr_suggested_display_precision = 0
     _attr_icon = "mdi:chart-timeline-variant"
-    _attr_translation_key = "billing_cycle_forecast"
+    _attr_name = "Billing Cycle Forecast"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -243,7 +243,7 @@ class MyWaterAdvisorAlertsSensor(_MyWaterAdvisorEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:alert-circle-outline"
-    _attr_translation_key = "active_alerts"
+    _attr_name = "Active Alerts"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -274,7 +274,7 @@ class MyWaterAdvisorBillingCycleUsageSensor(_MyWaterAdvisorEntity, SensorEntity)
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
     _attr_icon = "mdi:calendar-range"
-    _attr_translation_key = "billing_cycle_usage"
+    _attr_name = "Billing Cycle Usage"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
@@ -305,7 +305,7 @@ class MyWaterAdvisorNeighborhoodAverageSensor(_MyWaterAdvisorEntity, SensorEntit
     _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
     _attr_suggested_display_precision = 0
     _attr_icon = "mdi:home-group"
-    _attr_translation_key = "neighborhood_average_usage"
+    _attr_name = "Neighborhood Average Usage"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)

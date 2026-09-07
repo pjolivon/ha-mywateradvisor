@@ -34,7 +34,7 @@ class MyWaterAdvisorVacationModeSwitch(_MyWaterAdvisorEntity, SwitchEntity):
     """
 
     _attr_icon = "mdi:bag-suitcase-outline"
-    _attr_translation_key = "vacation_mode"
+    _attr_name = "Vacation Mode"
 
     def __init__(self, coordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry)
