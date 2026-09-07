@@ -17,7 +17,7 @@ from .const import BASE_URL, KNOWN_APP_ID_FALLBACK, PORTAL_ROOT_URL, VACATION_DE
 
 _LOGGER = logging.getLogger(__name__)
 
-_TIMEOUT = aiohttp.ClientTimeout(total=15)
+_TIMEOUT = aiohttp.ClientTimeout(total=30)
 _APP_ID_RE = re.compile(r'app:\s*"([0-9a-fA-F-]{36})"')
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src="([^"]+\.js)"')
 
@@ -46,7 +46,7 @@ async def _discover_app_id(session: aiohttp.ClientSession) -> str | None:
     try:
         async with session.get(PORTAL_ROOT_URL, timeout=_TIMEOUT) as resp:
             html = await resp.text()
-    except aiohttp.ClientError:
+    except (aiohttp.ClientError, TimeoutError):
         return None
 
     for src in _SCRIPT_SRC_RE.findall(html):
@@ -54,7 +54,7 @@ async def _discover_app_id(session: aiohttp.ClientSession) -> str | None:
         try:
             async with session.get(url, timeout=_TIMEOUT) as resp:
                 text = await resp.text()
-        except aiohttp.ClientError:
+        except (aiohttp.ClientError, TimeoutError):
             continue
         match = _APP_ID_RE.search(text)
         if match:
@@ -98,7 +98,7 @@ class MyWaterAdvisorClient:
                     raise MyWaterAdvisorAuthError("Invalid email or password")
                 resp.raise_for_status()
                 data = await resp.json()
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise MyWaterAdvisorError(f"Login request failed: {err}") from err
 
         token = data.get("token")
@@ -136,7 +136,7 @@ class MyWaterAdvisorClient:
                     body = await resp.text()
                     raise MyWaterAdvisorError(f"Request to {path} failed: {resp.status} {body}")
                 return await _safe_json(resp)
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, TimeoutError) as err:
             raise MyWaterAdvisorError(f"Request to {path} failed: {err}") from err
 
     async def async_get_meters(self):
