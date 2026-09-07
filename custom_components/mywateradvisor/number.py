@@ -74,7 +74,7 @@ class MyWaterAdvisorWaterPriceNumber(_MyWaterAdvisorEntity, NumberEntity):
     _attr_native_unit_of_measurement = "USD/gal"
     _attr_native_min_value = 0
     _attr_native_max_value = 10
-    _attr_native_step = 0.000001
+    _attr_native_step = 0.00000001
     _attr_mode = NumberMode.BOX
     _attr_icon = "mdi:cash"
     _attr_entity_category = EntityCategory.CONFIG

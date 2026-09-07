@@ -29,6 +29,7 @@ async def async_setup_entry(
             MyWaterAdvisorServiceAddressSensor(coordinator, entry),
             MyWaterAdvisorDebugSensor(coordinator, entry),
             MyWaterAdvisorForecastSensor(coordinator, entry),
+            MyWaterAdvisorForecastedCostSensor(coordinator, entry),
             MyWaterAdvisorAlertsSensor(coordinator, entry),
             MyWaterAdvisorBillingCycleUsageSensor(coordinator, entry),
             MyWaterAdvisorNeighborhoodAverageSensor(coordinator, entry),
@@ -236,6 +237,34 @@ class MyWaterAdvisorForecastSensor(_MyWaterAdvisorEntity, SensorEntity):
         # match that rather than surfacing floating-point noise like
         # 10688.7999999999.
         return round(value) if isinstance(value, (int, float)) else value
+
+
+class MyWaterAdvisorForecastedCostSensor(_MyWaterAdvisorEntity, SensorEntity):
+    """Estimated cost of the forecasted end-of-billing-cycle usage.
+
+    Computed locally (forecast_gallons * water_price_per_gallon) since the
+    portal never reports a dollar figure — same rate as the cost backfill
+    statistic, kept in sync via the "Price Per Gallon" number entity.
+    """
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "USD"
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:cash-multiple"
+    _attr_name = "Forecasted Cost"
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{stable_entry_id(entry)}_forecasted_cost"
+
+    @property
+    def native_value(self) -> float | None:
+        if not self.coordinator.data:
+            return None
+        forecast_gallons = self.coordinator.data.get("forecast_gallons")
+        if not isinstance(forecast_gallons, (int, float)):
+            return None
+        return round(forecast_gallons * self.coordinator.water_price_per_gallon, 2)
 
 
 class MyWaterAdvisorAlertsSensor(_MyWaterAdvisorEntity, SensorEntity):

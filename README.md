@@ -63,6 +63,7 @@ Enter the email and password you use to log into the MyWaterAdvisor portal.
 | Daily Usage | Sensor | Resets at local midnight |
 | Billing Cycle Usage | Sensor | Usage so far in the current billing cycle |
 | Billing Cycle Forecast | Sensor | Portal's own end-of-cycle projection |
+| Forecasted Cost | Sensor | Billing Cycle Forecast × Price Per Gallon |
 | Neighborhood Average Usage | Sensor | Diagnostic — most recent completed month |
 | Active Alerts | Sensor | Diagnostic — count of active portal alerts |
 | Last Reading Time | Sensor | Diagnostic — timestamp of the last real reading |
