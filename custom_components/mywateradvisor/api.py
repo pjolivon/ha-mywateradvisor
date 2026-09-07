@@ -5,6 +5,7 @@ https://github.com/nitrogen76/ha-mywateradvisor/blob/master/API.md
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -18,6 +19,8 @@ from .const import BASE_URL, KNOWN_APP_ID_FALLBACK, PORTAL_ROOT_URL, VACATION_DE
 _LOGGER = logging.getLogger(__name__)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
+_RETRY_COUNT = 2
+_RETRY_BACKOFF = 2  # seconds between retries
 _APP_ID_RE = re.compile(r'app:\s*"([0-9a-fA-F-]{36})"')
 _SCRIPT_SRC_RE = re.compile(r'<script[^>]+src="([^"]+\.js)"')
 
@@ -114,6 +117,30 @@ class MyWaterAdvisorClient:
         return {"x-app-id": app_id, "x-access-token": self._token}
 
     async def _request(self, method: str, path: str, json_body=None):
+        """Send a request to the portal API with automatic retry on timeout.
+
+        The 401/403 path already retries once with a fresh login token.
+        On top of that, transient network errors (TimeoutError, ClientError)
+        get up to _RETRY_COUNT additional attempts with a backoff delay —
+        so a single slow portal response no longer takes down the whole poll.
+        """
+        last_err: Exception | None = None
+        for attempt in range(1 + _RETRY_COUNT):
+            try:
+                return await self._do_request(method, path, json_body)
+            except MyWaterAdvisorAuthError:
+                raise
+            except MyWaterAdvisorError as err:
+                last_err = err
+                if attempt < _RETRY_COUNT:
+                    _LOGGER.debug(
+                        "MyWaterAdvisor: request %s %s attempt %d failed (retrying in %ss): %s",
+                        method, path, attempt + 1, _RETRY_BACKOFF, err,
+                    )
+                    await asyncio.sleep(_RETRY_BACKOFF)
+        raise last_err  # type: ignore[return-value]  # last_err is always set after a retry loop
+
+    async def _do_request(self, method: str, path: str, json_body=None):
         headers = await self._authed_headers()
         url = f"{BASE_URL}{path}"
         try:
