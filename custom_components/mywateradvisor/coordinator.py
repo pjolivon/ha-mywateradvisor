@@ -1,10 +1,11 @@
 """Data update coordinator for MyWaterAdvisor."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from homeassistant.components.recorder import get_instance
+from typing import Any
 from homeassistant.components.recorder.models import StatisticData, StatisticMeanType, StatisticMetaData
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
@@ -278,10 +279,31 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("MyWaterAdvisor: %s fetch failed (non-fatal): %s", label, err)
             return None
 
+    async def _fetch_optional_parallel(self, *tasks: tuple[str, callable]) -> dict[str, Any]:
+        """Run multiple optional fetches concurrently.
+
+        Each task is a (label, callable) pair. Auth errors from any task
+        propagate immediately; all other errors are logged and the result
+        for that label is None. Returns a {label: result} dict.
+        """
+        async def _run_one(label: str, coro):
+            try:
+                return label, await coro
+            except MyWaterAdvisorAuthError as err:
+                raise ConfigEntryAuthFailed(str(err)) from err
+            except MyWaterAdvisorError as err:
+                _LOGGER.debug("MyWaterAdvisor: %s fetch failed (non-fatal): %s", label, err)
+                return label, None
+
+        results = dict(await asyncio.gather(*(_run_one(label, fn()) for label, fn in tasks)))
+        return results
+
     async def _async_update_data(self) -> dict:
         try:
-            self.meter_info = await self.client.async_get_meter_info()
             meter_id = await self.client.async_get_meter_id()
+            # _ensure_meter_info() (called by async_get_meter_id) already caches
+            # the meter object — grab it instead of fetching again.
+            self.meter_info = self.client._meter_info or {}
             end = datetime.now(timezone.utc)
             start = end - LOOKBACK
             rows = await self.client.async_get_hourly_consumption(start, end)
@@ -351,20 +373,33 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
 
         # --- Optional features below: each is isolated so a bad guess on one
         # (mainly avg_households, whose response shape is unconfirmed) can't
-        # take down the core water-total tracking above. ---
+        # take down the core water-total tracking above.
+        # All fired concurrently — a single slow endpoint no longer blocks the
+        # rest from completing. ---
 
-        alerts = await self._fetch_optional(self.client.async_get_alerts(), "alerts") or []
+        optional = await self._fetch_optional_parallel(
+            ("alerts", lambda: self.client.async_get_alerts()),
+            ("forecast", lambda: self.client.async_get_forecast()),
+            ("vacations", lambda: self.client.async_get_vacations()),
+            ("billing_cycles", lambda: self.client.async_get_billing_cycles()),
+            ("monthly_limit", lambda: self.client.async_get_monthly_limit()),
+            ("avg_households", lambda: self.client.async_get_avg_households(
+                end - AVG_HOUSEHOLDS_MONTHS, end,
+            )),
+        )
+
+        alerts = optional.get("alerts") or []
         if not isinstance(alerts, list):
             alerts = []
 
-        forecast_raw = await self._fetch_optional(self.client.async_get_forecast(), "forecast")
+        forecast_raw = optional.get("forecast")
         forecast_gallons = (
             forecast_raw.get("estimatedConsumption")
             if isinstance(forecast_raw, dict)
             else None
         )
 
-        vacations = await self._fetch_optional(self.client.async_get_vacations(), "vacations") or []
+        vacations = optional.get("vacations") or []
         if not isinstance(vacations, list):
             vacations = []
         my_vacations = [
@@ -376,7 +411,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         billing_cycle_usage = None
         monthly_limit = None
 
-        billing_cycles = await self._fetch_optional(self.client.async_get_billing_cycles(), "billing_cycles")
+        billing_cycles = optional.get("billing_cycles")
         if isinstance(billing_cycles, list):
             current_cycle = next(
                 (
@@ -405,15 +440,10 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             except (MyWaterAdvisorError, ValueError, KeyError) as err:
                 _LOGGER.debug("MyWaterAdvisor: billing cycle usage fetch failed (non-fatal): %s", err)
 
-        monthly_limit_raw = await self._fetch_optional(self.client.async_get_monthly_limit(), "monthly_limit")
+        monthly_limit_raw = optional.get("monthly_limit")
         monthly_limit = _parse_monthly_limit(monthly_limit_raw)
 
-        avg_households_end = end
-        avg_households_start = avg_households_end - AVG_HOUSEHOLDS_MONTHS
-        avg_households_raw = await self._fetch_optional(
-            self.client.async_get_avg_households(avg_households_start, avg_households_end),
-            "avg_households",
-        )
+        avg_households_raw = optional.get("avg_households")
 
         return {
             "total": round(self._total, 2),
