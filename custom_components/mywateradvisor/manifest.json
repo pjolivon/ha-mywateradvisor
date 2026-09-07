@@ -1,13 +1,13 @@
 {
   "domain": "mywateradvisor",
   "name": "MyWaterAdvisor",
-  "version": "1.0.0",
+  "after_dependencies": ["recorder"],
+  "codeowners": ["@pjolivon"],
+  "config_flow": true,
   "documentation": "https://github.com/pjolivon/ha-mywateradvisor",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/pjolivon/ha-mywateradvisor/issues",
   "requirements": [],
-  "codeowners": ["@pjolivon"],
-  "iot_class": "cloud_polling",
-  "integration_type": "device",
-  "config_flow": true,
-  "after_dependencies": ["recorder"]
+  "version": "1.0.0"
 }
