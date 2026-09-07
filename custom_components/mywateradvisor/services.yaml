@@ -1,0 +1,70 @@
+schedule_vacation:
+  name: Schedule Vacation
+  description: >-
+    Schedule a vacation date range on the MyWaterAdvisor portal — tightens
+    leak/usage alerting while you're away. Applies to all configured
+    MyWaterAdvisor accounts.
+  fields:
+    device_id:
+      name: Water Meter Account
+      description: Limit this action to one MyWaterAdvisor account. Omit to apply to all configured accounts.
+      required: false
+      selector:
+        device:
+          integration: mywateradvisor
+    start_date:
+      name: Start Date
+      description: First day of the vacation.
+      required: true
+      selector:
+        date:
+    end_date:
+      name: End Date
+      description: Last day of the vacation.
+      required: true
+      selector:
+        date:
+    daily_limit:
+      name: Daily Consumption Limit
+      description: >-
+        Optional daily gallons threshold that triggers a "Daily Usage During
+        Vacation" alert while away.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: gal
+          mode: box
+
+cancel_vacation:
+  name: Cancel Vacation
+  description: >-
+    Cancel a scheduled vacation. Omit vacation_id to cancel the currently
+    active one (see the Vacation Mode sensor's vacation_id attribute).
+  fields:
+    device_id:
+      name: Water Meter Account
+      description: Limit this action to one MyWaterAdvisor account. Omit to apply to all configured accounts.
+      required: false
+      selector:
+        device:
+          integration: mywateradvisor
+    vacation_id:
+      name: Vacation ID
+      description: The vacation's ID. Omit to cancel the currently active vacation.
+      required: false
+      selector:
+        text:
+
+clear_billing_cycle_limit:
+  name: Clear Billing Cycle Limit
+  description: Remove the configured billing-cycle consumption budget on the portal.
+  fields:
+    device_id:
+      name: Water Meter Account
+      description: Limit this action to one MyWaterAdvisor account. Omit to apply to all configured accounts.
+      required: false
+      selector:
+        device:
+          integration: mywateradvisor
