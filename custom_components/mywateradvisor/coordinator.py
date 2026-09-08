@@ -11,6 +11,7 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMea
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
@@ -189,47 +190,67 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         statistic_id rather than the live sensor's entity-based one, so this
         can never collide with HA's native total_increasing compiler (that
         collision is what corrupted the Energy dashboard previously — see
-        MyWaterAdvisorTotalSensor's docstring). Continuing from the last
-        imported hour's cumulative sum, rather than re-importing everything
-        every refresh, makes this idempotent and gives the Energy dashboard
-        full history instead of just what the live entities happened to be
-        recording.
+        MyWaterAdvisorTotalSensor's docstring).
+
+        Re-imports the entire lookback window every poll rather than only
+        appending rows newer than the last stored one. async_add_external_statistics
+        is an upsert keyed on (statistic_id, start), so re-sending a bucket
+        whose consumption the portal revised after first publish (late mesh
+        reads, spike corrections — confirmed in the upstream API docs) updates
+        the existing row in place instead of dropping it. The previous
+        ``ts > last_start`` filter silently discarded those revisions and left
+        the Energy dashboard with wrong/stale totals.
+
+        To keep this idempotent (re-importing overlapping rows must not
+        double-count), the running sum is re-seeded each poll to the stored
+        sum at the earliest bucket we're re-importing, minus that bucket's
+        own old contribution — i.e. the cumulative sum just BEFORE the first
+        bucket. Existing rows are read via statistics_during_period. This
+        mirrors the reference implementation's baseline-subtraction approach.
 
         Wrapped in one broad try/except, like the optional-feature fetches
         below: this is a nice-to-have for the Energy dashboard, and a
         recorder-internals surprise here (e.g. get_last_statistics returning
         "start" as a raw Unix timestamp instead of a datetime, depending on
         HA version) must never take down the core water-total tracking.
+        Failures are logged at WARNING with a traceback so a regression here
+        is visible — the previous DEBUG log hid a missing get_instance import
+        for an entire release.
         """
+        if not parsed:
+            return
+
         try:
-            last_stats = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
-            )
+            # Hour-aligned starts, as required by the recorder (minutes/seconds
+            # must be zero) and as returned by statistics_during_period.
+            buckets = [
+                (ts.replace(minute=0, second=0, microsecond=0), cons) for ts, cons in parsed
+            ]
+            first_start = buckets[0][0]
 
-            running_sum = 0.0
-            last_start: datetime | None = None
-            if last_stats.get(statistic_id):
-                last_row = last_stats[statistic_id][0]
-                running_sum = last_row["sum"] or 0.0
-                raw_start = last_row["start"]
-                last_start = (
-                    dt_util.utc_from_timestamp(raw_start)
-                    if isinstance(raw_start, (int, float))
-                    else dt_util.as_utc(raw_start)
-                )
+            # Cumulative sum of the NEW bucket values up to and including each
+            # start. Used to recover the pre-window baseline: for any existing
+            # stored row whose start matches one of our buckets, the stored sum
+            # already includes that bucket's (old) value, so
+            #   baseline = stored_sum - bucket_total_at_that_start
+            # is the cumulative sum just before that bucket. Re-adding every
+            # bucket from there on then reproduces the correct running totals
+            # without double-counting the re-imported window.
+            bucket_totals: dict[datetime, float] = {}
+            running_bucket_total = 0.0
+            for start, cons in buckets:
+                running_bucket_total = round(running_bucket_total + per_reading_value(cons), round_digits)
+                bucket_totals[start] = running_bucket_total
 
-            new_rows = [(ts, cons) for ts, cons in parsed if last_start is None or ts > last_start]
-            if not new_rows:
-                return
+            running_sum = await self._async_baseline_sum(statistic_id, first_start, bucket_totals)
 
             statistics: list[StatisticData] = []
-            for ts, cons in new_rows:
-                running_sum += per_reading_value(cons)
-                statistics.append(
-                    StatisticData(
-                        start=ts.replace(minute=0, second=0, microsecond=0), sum=round(running_sum, round_digits)
-                    )
-                )
+            for ts, cons in buckets:
+                running_sum = round(running_sum + per_reading_value(cons), round_digits)
+                statistics.append(StatisticData(start=ts, sum=running_sum))
+
+            if not statistics:
+                return
 
             metadata = StatisticMetaData(
                 has_mean=False,
@@ -242,7 +263,72 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             )
             async_add_external_statistics(self.hass, metadata, statistics)
         except Exception as err:  # noqa: BLE001 - recorder internals; never fail the poll over this
-            _LOGGER.debug("MyWaterAdvisor: statistics import for %s failed (non-fatal): %s", statistic_id, err)
+            _LOGGER.warning(
+                "MyWaterAdvisor: statistics import for %s failed (non-fatal): %s",
+                statistic_id,
+                err,
+                exc_info=True,
+            )
+
+    async def _async_baseline_sum(
+        self, statistic_id: str, first_start: datetime, bucket_totals: dict[datetime, float]
+    ) -> float:
+        """Recover the cumulative sum stored just before the import window.
+
+        See _async_import_external_statistic for the double-counting rationale.
+        ``bucket_totals`` maps each bucket start to the cumulative sum of NEW
+        bucket values up to and including that start.
+
+        1. Read the existing statistic rows from ``first_start`` onward.
+        2. For the first stored row whose start matches a bucket we're
+           re-importing, the stored sum includes that bucket's old value, so
+           ``stored_sum - bucket_total[start]`` is the baseline before the
+           window — re-adding the buckets reproduces correct running totals.
+        3. If no stored row falls inside the window (first import, or the
+           window slid past all stored rows), fall back to the statistic's
+           last stored sum — but only if it predates ``first_start`` (else
+           re-adding the window would double-count it). Brand-new statistics
+           start at 0.0.
+        """
+        period_stats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            first_start,
+            None,
+            {statistic_id},
+            "hour",
+            None,
+            {"sum"},
+        )
+        existing = period_stats.get(statistic_id, []) if period_stats else []
+        for record in existing:
+            raw_start = record.get("start")
+            record_start = (
+                dt_util.utc_from_timestamp(raw_start)
+                if isinstance(raw_start, (int, float))
+                else dt_util.as_utc(raw_start)
+            )
+            if record_start in bucket_totals and record.get("sum") is not None:
+                return float(record["sum"]) - bucket_totals[record_start]
+
+        # No stored row inside the window: carry the last stored sum forward
+        # only if it predates first_start (its contribution is entirely below
+        # the window, so re-adding the window doesn't re-count it).
+        last_stats = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
+        )
+        if last_stats.get(statistic_id):
+            last_row = last_stats[statistic_id][0]
+            last_sum = last_row.get("sum")
+            raw_start = last_row.get("start")
+            last_start = (
+                dt_util.utc_from_timestamp(raw_start)
+                if isinstance(raw_start, (int, float))
+                else dt_util.as_utc(raw_start)
+            )
+            if last_sum is not None and last_start is not None and last_start < first_start:
+                return float(last_sum)
+        return 0.0
 
     async def _async_backfill_statistics(self, parsed: list[tuple[datetime, float]]) -> None:
         if not parsed:
