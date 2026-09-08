@@ -13,7 +13,7 @@ from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     statistics_during_period,
 )
-from homeassistant.const import UnitOfVolume
+from homeassistant.const import VOLUME, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -181,6 +181,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         statistic_id: str,
         name: str,
         unit: str,
+        unit_class: str | None,
         per_reading_value,
         round_digits: int,
     ) -> None:
@@ -260,6 +261,13 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
                 source=DOMAIN,
                 statistic_id=statistic_id,
                 unit_of_measurement=unit,
+                # unit_class is required from HA 2026.11 (omitting it raises a
+                # deprecation warning on current HA). "volume" for gallons
+                # (VolumeConverter.UNIT_CLASS == const.VOLUME); None for the USD
+                # cost statistic — there is no monetary unit converter, and None
+                # is the value HA itself assigns for units outside
+                # STATISTIC_UNIT_TO_UNIT_CONVERTER.
+                unit_class=unit_class,
             )
             async_add_external_statistics(self.hass, metadata, statistics)
         except Exception as err:  # noqa: BLE001 - recorder internals; never fail the poll over this
@@ -338,6 +346,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             statistic_id=self._external_statistic_id,
             name=EXTERNAL_STATISTIC_NAME,
             unit=UnitOfVolume.GALLONS,
+            unit_class=VOLUME,
             per_reading_value=lambda cons: cons,
             round_digits=2,
         )
@@ -346,6 +355,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             statistic_id=self._external_cost_statistic_id,
             name=EXTERNAL_COST_STATISTIC_NAME,
             unit="USD",
+            unit_class=None,
             per_reading_value=lambda cons: cons * self._water_price_per_gallon,
             round_digits=4,
         )
