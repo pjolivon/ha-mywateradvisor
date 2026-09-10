@@ -92,10 +92,18 @@ def _parse_and_sort(clean: list[dict]) -> list[tuple[datetime, float]]:
         if not raw_dt:
             continue
         try:
-            # The portal returns naive "YYYY-MM-DDTHH:MM:SS" strings with no
-            # offset. Treat them as UTC (the reference project's own
-            # documented assumption).
-            ts = datetime.fromisoformat(raw_dt).replace(tzinfo=timezone.utc)
+            # The portal returns naive "YYYY-MM-DDTHH:MM:SS" strings. The
+            # reference project's documented assumption was that these are
+            # UTC, but that's wrong: confirmed against a real account, two
+            # ~100 gallon hourly spikes landed on the wrong side of a day
+            # boundary under that assumption (the two days summed correctly,
+            # ~5 gal apart, but split ~100 gal wrong between them) — and
+            # exactly right once the naive value is treated as HA's own
+            # local wall-clock time instead. as_local() on a naive datetime
+            # stamps it with the local zone rather than converting, which is
+            # what we want here; as_utc() then gives a proper tz-aware
+            # instant (DST-safe) for the rest of the pipeline.
+            ts = dt_util.as_utc(dt_util.as_local(datetime.fromisoformat(raw_dt)))
         except (ValueError, TypeError):
             continue
         parsed.append((ts, row["cons"]))
