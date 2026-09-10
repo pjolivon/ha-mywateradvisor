@@ -352,6 +352,71 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
                 return float(last_sum)
         return 0.0
 
+    async def _async_stat_sum_before(self, statistic_id: str, at: datetime) -> float:
+        """Return the external statistic's cumulative sum as of just before
+        ``at`` (0.0 if there's no stored row that far back).
+
+        Reads persisted long-term stats directly, independent of the current
+        poll's hourly lookback window — so, unlike ``parsed``, this reflects
+        the full stored history even beyond LOOKBACK/INITIAL_BACKFILL_LOOKBACK.
+        Used by the billing-cycle reconciliation check below.
+        """
+        period_stats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period, self.hass, None, at, {statistic_id}, "hour", None, {"sum"},
+        )
+        rows = period_stats.get(statistic_id, []) if period_stats else []
+        if not rows:
+            return 0.0
+        last_sum = rows[-1].get("sum")
+        return float(last_sum) if last_sum is not None else 0.0
+
+    async def _async_reconcile_billing_cycle(
+        self, cycle_start_dt: datetime, end: datetime, billing_cycle_usage: float
+    ) -> dict:
+        """Compare the hourly-derived total for the current billing cycle
+        against the portal's own daily-consumption total for the same
+        window (``billing_cycle_usage`` — confirmed to match the provider's
+        billing statements exactly, since it isn't bounded by any lookback
+        window).
+
+        This is a diagnostic check only — it never corrects
+        ``self._total``/``self._daily_total`` itself, since the hourly path
+        is kept for its finer granularity and the daily endpoint has its own
+        publish lag. It exists to surface a regression like the LOOKBACK/
+        watermark bugs fixed in 1.3.0 (a real, silent divergence between the
+        two) instead of only discovering it by manually diffing against the
+        provider's portal again.
+        """
+        try:
+            hourly_cycle_usage = round(
+                await self._async_stat_sum_before(self._external_statistic_id, end)
+                - await self._async_stat_sum_before(self._external_statistic_id, cycle_start_dt),
+                2,
+            )
+        except Exception as err:  # noqa: BLE001 - recorder internals; never fail the poll over this
+            _LOGGER.debug("MyWaterAdvisor: billing cycle reconciliation failed (non-fatal): %s", err)
+            return {}
+
+        delta = round(billing_cycle_usage - hourly_cycle_usage, 2)
+        # Ignore tiny/early-cycle noise: require a delta that's both a
+        # meaningful fraction of the cycle and not just rounding dust.
+        threshold = max(10.0, 0.02 * billing_cycle_usage)
+        if abs(delta) > threshold:
+            _LOGGER.warning(
+                "MyWaterAdvisor: billing cycle reconciliation mismatch — "
+                "hourly-derived total %.2f gal vs portal daily total %.2f gal "
+                "(delta %.2f gal). The hourly/Energy-dashboard totals may be "
+                "under- or over-reporting; the portal's own daily total is "
+                "the reference.",
+                hourly_cycle_usage,
+                billing_cycle_usage,
+                delta,
+            )
+        return {
+            "hourly_derived_total": hourly_cycle_usage,
+            "delta": delta,
+        }
+
     async def _async_backfill_statistics(self, parsed: list[tuple[datetime, float]]) -> float | None:
         """Import both external statistics; returns the volume statistic's
         final running sum (see _async_import_external_statistic) for the
@@ -528,6 +593,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         billing_cycle_end = None
         billing_cycle_usage = None
         monthly_limit = None
+        cycle_reconciliation: dict = {}
 
         billing_cycles = optional.get("billing_cycles")
         if isinstance(billing_cycles, list):
@@ -553,6 +619,9 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
                 billing_cycle_usage = round(
                     sum(row["cons"] for row in _clean_consumption_rows(daily_readings)), 2
                 )
+                cycle_reconciliation = await self._async_reconcile_billing_cycle(
+                    cycle_start_dt, end, billing_cycle_usage
+                )
             except MyWaterAdvisorAuthError as err:
                 raise ConfigEntryAuthFailed(str(err)) from err
             except (MyWaterAdvisorError, ValueError, KeyError) as err:
@@ -576,6 +645,8 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             "billing_cycle_start": billing_cycle_start,
             "billing_cycle_end": billing_cycle_end,
             "billing_cycle_usage": billing_cycle_usage,
+            "cycle_reconciliation_hourly_total": cycle_reconciliation.get("hourly_derived_total"),
+            "cycle_reconciliation_delta": cycle_reconciliation.get("delta"),
             "monthly_limit": monthly_limit,
             "avg_households_raw": avg_households_raw,
         }
