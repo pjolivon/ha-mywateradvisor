@@ -307,7 +307,14 @@ class MyWaterAdvisorAlertsSensor(_MyWaterAdvisorEntity, SensorEntity):
 
 
 class MyWaterAdvisorBillingCycleUsageSensor(_MyWaterAdvisorEntity, SensorEntity):
-    """Consumption so far in the current billing cycle, in gallons."""
+    """Consumption so far in the current billing cycle, in gallons.
+
+    Also carries the hourly-vs-daily reconciliation check as attributes:
+    the portal's own daily-consumption total for the cycle (this sensor's
+    state) isn't bounded by the hourly path's lookback window, so it's used
+    as a reference to catch a future regression like the ones fixed in
+    1.3.0 without waiting to notice the Energy dashboard has drifted.
+    """
 
     _attr_device_class = SensorDeviceClass.WATER
     _attr_state_class = SensorStateClass.TOTAL
@@ -331,6 +338,8 @@ class MyWaterAdvisorBillingCycleUsageSensor(_MyWaterAdvisorEntity, SensorEntity)
         return {
             "billing_cycle_start": data.get("billing_cycle_start"),
             "billing_cycle_end": data.get("billing_cycle_end"),
+            "hourly_derived_total": data.get("cycle_reconciliation_hourly_total"),
+            "reconciliation_delta": data.get("cycle_reconciliation_delta"),
         }
 
 
