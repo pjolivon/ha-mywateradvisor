@@ -21,6 +21,7 @@ PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]
 SERVICE_SCHEDULE_VACATION = "schedule_vacation"
 SERVICE_CANCEL_VACATION = "cancel_vacation"
 SERVICE_CLEAR_BILLING_CYCLE_LIMIT = "clear_billing_cycle_limit"
+SERVICE_RESYNC_STATISTICS = "resync_statistics"
 
 # Optional on every service below: limit the action to one account's device
 # instead of all configured MyWaterAdvisor accounts (the default).
@@ -38,6 +39,7 @@ CANCEL_VACATION_SCHEMA = vol.Schema(
     {**_TARGET_DEVICE_FIELD, vol.Optional("vacation_id"): vol.Any(str, int)}
 )
 CLEAR_BILLING_CYCLE_LIMIT_SCHEMA = vol.Schema(_TARGET_DEVICE_FIELD)
+RESYNC_STATISTICS_SCHEMA = vol.Schema(_TARGET_DEVICE_FIELD)
 
 
 def _target_coordinators(hass: HomeAssistant, call: ServiceCall) -> list[MyWaterAdvisorCoordinator]:
@@ -109,6 +111,16 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 raise HomeAssistantError(f"Could not clear billing cycle limit: {err}") from err
             await coordinator.async_request_refresh()
 
+    async def handle_resync_statistics(call: ServiceCall) -> None:
+        """One-time recovery for a gap older than this coordinator's own
+        history — e.g. data missed before INITIAL_BACKFILL_LOOKBACK/the
+        late-bucket fixes existed. See
+        MyWaterAdvisorCoordinator.async_resync_statistics for what this
+        actually does (reset the "last processed" watermark and force a
+        wide-window refresh)."""
+        for coordinator in _target_coordinators(hass, call):
+            await coordinator.async_resync_statistics()
+
     hass.services.async_register(
         DOMAIN, SERVICE_SCHEDULE_VACATION, handle_schedule_vacation, schema=SCHEDULE_VACATION_SCHEMA
     )
@@ -120,6 +132,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         SERVICE_CLEAR_BILLING_CYCLE_LIMIT,
         handle_clear_billing_cycle_limit,
         schema=CLEAR_BILLING_CYCLE_LIMIT_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_RESYNC_STATISTICS, handle_resync_statistics, schema=RESYNC_STATISTICS_SCHEMA
     )
 
 
@@ -143,6 +158,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, SERVICE_SCHEDULE_VACATION)
             hass.services.async_remove(DOMAIN, SERVICE_CANCEL_VACATION)
             hass.services.async_remove(DOMAIN, SERVICE_CLEAR_BILLING_CYCLE_LIMIT)
+            hass.services.async_remove(DOMAIN, SERVICE_RESYNC_STATISTICS)
     return unload_ok
 
 

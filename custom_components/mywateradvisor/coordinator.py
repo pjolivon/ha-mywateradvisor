@@ -149,6 +149,22 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         await self._async_save()
         self.async_update_listeners()
 
+    async def async_resync_statistics(self) -> None:
+        """One-time recovery for a gap that predates this coordinator's own
+        fixes (e.g. data missed before the INITIAL_BACKFILL_LOOKBACK/
+        late-bucket fixes existed, or lost during initial setup).
+
+        Resetting ``_last_processed`` to None makes the next
+        ``_async_update_data`` treat this like a fresh install and fetch
+        INITIAL_BACKFILL_LOOKBACK days instead of just LOOKBACK — the same
+        path a real first run takes, just triggered on demand. Total/Daily
+        get recomputed from that wider fetch automatically; nothing here
+        needs to guess or carry forward old (possibly wrong) values.
+        """
+        self._last_processed = None
+        await self._async_save()
+        await self.async_request_refresh()
+
     async def async_load(self) -> None:
         """Restore persisted totals before the first refresh."""
         stored = await self._store.async_load()
