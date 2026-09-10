@@ -28,6 +28,14 @@ _LOGGER = logging.getLogger(__name__)
 
 UPDATE_INTERVAL = timedelta(hours=1)
 LOOKBACK = timedelta(days=3)
+# How far back a single poll is allowed to reach to recover a gap (fresh
+# install, or the coordinator/HA having been down or unavailable for a
+# while). Without this, a plain `end - LOOKBACK` window permanently loses
+# any consumption older than LOOKBACK the moment it ages out of range, with
+# no way to ever recover it — confirmed to have dropped several real days
+# of usage from the Energy dashboard after this integration's own
+# multi-day outage during initial setup.
+INITIAL_BACKFILL_LOOKBACK = timedelta(days=35)
 AVG_HOUSEHOLDS_MONTHS = timedelta(days=365)
 STORAGE_VERSION = 1
 
@@ -184,8 +192,13 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         unit_class: str | None,
         per_reading_value,
         round_digits: int,
-    ) -> None:
+    ) -> float | None:
         """Import real hourly readings into a dedicated external statistic.
+
+        Returns the final running sum (baseline-before-window plus this
+        window's total) so callers can reuse it as an authoritative,
+        late-bucket-aware total instead of maintaining their own separately
+        — or None if there was nothing to import.
 
         Uses async_add_external_statistics under our own "mywateradvisor:..."
         statistic_id rather than the live sensor's entity-based one, so this
@@ -270,6 +283,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
                 unit_class=unit_class,
             )
             async_add_external_statistics(self.hass, metadata, statistics)
+            return running_sum
         except Exception as err:  # noqa: BLE001 - recorder internals; never fail the poll over this
             _LOGGER.warning(
                 "MyWaterAdvisor: statistics import for %s failed (non-fatal): %s",
@@ -338,10 +352,13 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
                 return float(last_sum)
         return 0.0
 
-    async def _async_backfill_statistics(self, parsed: list[tuple[datetime, float]]) -> None:
+    async def _async_backfill_statistics(self, parsed: list[tuple[datetime, float]]) -> float | None:
+        """Import both external statistics; returns the volume statistic's
+        final running sum (see _async_import_external_statistic) for the
+        caller to reuse as the live Total sensor's value."""
         if not parsed:
-            return
-        await self._async_import_external_statistic(
+            return None
+        volume_total = await self._async_import_external_statistic(
             parsed,
             statistic_id=self._external_statistic_id,
             name=EXTERNAL_STATISTIC_NAME,
@@ -359,6 +376,7 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             per_reading_value=lambda cons: cons * self._water_price_per_gallon,
             round_digits=4,
         )
+        return volume_total
 
     async def _fetch_optional(self, coro, label: str):
         """Fetch a non-critical endpoint; log and return None instead of failing the update.
@@ -402,7 +420,18 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
             # the meter object — grab it instead of fetching again.
             self.meter_info = self.client._meter_info or {}
             end = datetime.now(timezone.utc)
-            start = end - LOOKBACK
+            # Normally just LOOKBACK days back. But widen back to
+            # `_last_processed` (capped at INITIAL_BACKFILL_LOOKBACK so a very
+            # long outage doesn't balloon the request) whenever the gap since
+            # the last successful poll is bigger than LOOKBACK — see
+            # INITIAL_BACKFILL_LOOKBACK's docstring for why.
+            if self._last_processed is None:
+                start = end - INITIAL_BACKFILL_LOOKBACK
+            else:
+                start = max(
+                    min(end - LOOKBACK, self._last_processed),
+                    end - INITIAL_BACKFILL_LOOKBACK,
+                )
             rows = await self.client.async_get_hourly_consumption(start, end)
         except MyWaterAdvisorAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
@@ -413,60 +442,52 @@ class MyWaterAdvisorCoordinator(DataUpdateCoordinator):
         clean = _clean_consumption_rows(readings)
         parsed = _parse_and_sort(clean)
 
-        await self._async_backfill_statistics(parsed)
+        window_total = await self._async_backfill_statistics(parsed)
 
         # Roll the daily counter over at local midnight even when no new
         # reading has arrived yet — otherwise "Today's Water Usage" keeps
         # showing yesterday's total until a reading dated in the new day
-        # finally comes in through the incremental loop below.
+        # finally comes in.
         current_local_day = dt_util.now().strftime("%Y-%m-%d")
-        if current_local_day != self._daily_date:
+        day_rolled_over = current_local_day != self._daily_date
+        if day_rolled_over:
             self._daily_date = current_local_day
             self._daily_total = 0.0
             # Mark the rollover with the exact reset instant (local midnight)
             # so the daily sensor's TOTAL statistics treat it as a deliberate
             # reset rather than an anomalous drop.
             self._daily_reset_at = dt_util.start_of_local_day()
-            await self._async_save()
 
-        if self._last_processed is None:
-            if parsed:
-                # First run ever: seed the live total to the visible lookback
-                # sum instead of starting at 0, so the Total sensor reflects
-                # real recent consumption immediately rather than counting the
-                # whole backlog as usage the instant it first reports.
-                self._last_processed = parsed[-1][0]
-                self._total = round(sum(cons for _, cons in parsed), 2)
-                # Seed today's portion too, rather than leaving it at 0 until
-                # the next incremental reading — the lookback window may
-                # already include hours from today.
-                self._daily_total = round(
-                    sum(
-                        cons
-                        for ts, cons in parsed
-                        if dt_util.as_local(ts).strftime("%Y-%m-%d") == self._daily_date
-                    ),
-                    2,
-                )
-                await self._async_save()
-        else:
-            changed = False
-            for ts, cons in parsed:
-                if ts <= self._last_processed:
-                    continue
-                local_day = dt_util.as_local(ts).strftime("%Y-%m-%d")
-                if local_day != self._daily_date:
-                    self._daily_date = local_day
-                    self._daily_total = 0.0
-                    # Reset instant is this reading's local midnight (see the
-                    # rollover block above for why last_reset must be marked).
-                    self._daily_reset_at = dt_util.start_of_local_day(dt_util.as_local(ts))
-                self._total += cons
-                self._daily_total += cons
-                self._last_processed = ts
-                changed = True
-            if changed:
-                await self._async_save()
+        changed = day_rolled_over
+
+        if parsed:
+            # Recomputed fresh from the whole lookback window every poll,
+            # rather than incrementally accumulated past a "last processed"
+            # watermark: the portal publishes hourly buckets late or revises
+            # them after the fact (see _async_import_external_statistic), and
+            # a watermark silently drops any such bucket whose timestamp
+            # falls at or before one that already advanced it — this was
+            # under-reporting real days by 30-90% versus the provider's own
+            # portal totals.
+            self._daily_total = round(
+                sum(
+                    cons
+                    for ts, cons in parsed
+                    if dt_util.as_local(ts).strftime("%Y-%m-%d") == self._daily_date
+                ),
+                2,
+            )
+            newest = parsed[-1][0]
+            if self._last_processed is None or newest > self._last_processed:
+                self._last_processed = newest
+            changed = True
+
+        if window_total is not None:
+            self._total = round(window_total, 2)
+            changed = True
+
+        if changed:
+            await self._async_save()
 
         # --- Optional features below: each is isolated so a bad guess on one
         # (mainly avg_households, whose response shape is unconfirmed) can't
