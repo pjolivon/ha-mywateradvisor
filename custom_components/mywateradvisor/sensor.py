@@ -79,6 +79,16 @@ class MyWaterAdvisorTotalSensor(_MyWaterAdvisorEntity, SensorEntity):
     from live state. That collision silently corrupted the Energy dashboard
     twice (the -1,129.8 gal dip on 2026-09-06), so the manual backfill was
     removed entirely.
+
+    The state itself (``coordinator.data["total"]``) is not a locally
+    accumulated running counter — it mirrors the external "Water Meter
+    Consumption" statistic's own running sum (see
+    MyWaterAdvisorCoordinator._async_backfill_statistics), which already
+    re-derives itself from the full lookback window every poll and so picks
+    up hourly buckets the portal publishes late or revises after the fact.
+    A naive local "add only rows newer than the last one seen" counter
+    silently dropped those out-of-order buckets and under-reported real
+    days by 30-90% versus the provider's own portal.
     """
 
     _attr_device_class = SensorDeviceClass.WATER

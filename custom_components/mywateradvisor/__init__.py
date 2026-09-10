@@ -150,8 +150,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete the coordinator's persisted store when the entry is fully removed.
 
     A remove/re-add (e.g. for reauth) will lose the running total and
-    re-seed from the 3-day lookback, same as a first install — this only
-    runs on an actual "Delete" from the UI, not a reload/disable.
+    re-seed from INITIAL_BACKFILL_LOOKBACK, same as a first install — this
+    only runs on an actual "Delete" from the UI, not a reload/disable.
     """
     stable_id = stable_entry_id(entry)
     await Store(hass, STORAGE_VERSION, f"{DOMAIN}_{stable_id}").async_remove()
