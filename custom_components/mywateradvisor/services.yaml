@@ -68,3 +68,23 @@ clear_billing_cycle_limit:
       selector:
         device:
           integration: mywateradvisor
+
+resync_statistics:
+  name: Resync Statistics
+  description: >-
+    One-time recovery for consumption data older than this coordinator's own
+    history predates its LOOKBACK window — for example, days missed before
+    the coordinator existed or before a gap-recovery fix shipped. Forces the
+    next poll to fetch INITIAL_BACKFILL_LOOKBACK days instead of the normal
+    LOOKBACK, re-importing that wider window into Total Usage, Daily Usage,
+    and the Energy dashboard's external statistics. Safe to call any time —
+    it only widens the next fetch, it does not delete or reset existing data.
+  fields:
+    device_id:
+      name: Water Meter Account
+      description: Limit this action to one MyWaterAdvisor account. Omit to apply to all configured accounts.
+      required: false
+      selector:
+        device:
+          integration: mywateradvisor
+
