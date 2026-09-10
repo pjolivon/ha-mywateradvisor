@@ -16,7 +16,7 @@ from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from .coordinator import STORAGE_VERSION, MyWaterAdvisorCoordinator
 from .util import parse_flexible_date, stable_entry_id
 
-PLATFORMS = ["sensor", "binary_sensor", "number", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "number", "switch", "button"]
 
 SERVICE_SCHEDULE_VACATION = "schedule_vacation"
 SERVICE_CANCEL_VACATION = "cancel_vacation"
